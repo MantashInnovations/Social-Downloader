@@ -57,6 +57,7 @@ function getCommonArgs() {
         "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "--add-header", "Accept-Language:en-US,en;q=0.9",
         "--add-header", "Sec-Fetch-Mode:navigate",
+        "--ignore-no-formats-error", // Critical for image posts
     ];
 
     // Check if cookies.txt exists in the server folder
@@ -101,12 +102,13 @@ function sanitizeFilename(name) {
  */
 function processFormats(formats, info) {
     if (!formats || formats.length === 0) {
+        // This is likely an image post or a site where formats are hidden
         return [{
             format_id: "best",
-            label: "Best Quality",
-            resolution: "Auto",
+            label: info.vcodec === "none" ? "High Quality Image" : "Best Quality",
+            resolution: info.vcodec === "none" ? "Original" : "Auto",
             size: "Unknown",
-            ext: "mp4",
+            ext: info.vcodec === "none" ? "jpg" : "mp4",
             recommended: true,
         }];
     }
@@ -272,9 +274,14 @@ app.get("/api/download", async (req, res) => {
         }
 
         const fullPath = path.join(workDir, createdFile);
-        const actualExt = path.extname(fullPath).slice(1);
+        const actualExt = path.extname(fullPath).slice(1).toLowerCase();
         const stat = fs.statSync(fullPath);
-        const contentType = (actualExt === "mp3" || isAudio) ? "audio/mpeg" : "video/mp4";
+
+        // Dynamic content type detection
+        let contentType = "application/octet-stream";
+        if (["mp3", "m4a", "wav", "flac"].includes(actualExt) || isAudio) contentType = "audio/mpeg";
+        else if (["mp4", "mkv", "webm"].includes(actualExt)) contentType = "video/mp4";
+        else if (["jpg", "jpeg", "png", "webp"].includes(actualExt)) contentType = "image/jpeg";
 
         console.log(`[download] streaming: ${createdFile} (${stat.size} bytes)`);
 
