@@ -97,152 +97,85 @@ function sanitizeFilename(name) {
 
 /**
  * Process raw yt-dlp format list into clean quality tiers for the UI.
+ * Only shows formats that are actually available based on the video metadata.
  */
 function processFormats(formats, info) {
-    const result = [];
-
     if (!formats || formats.length === 0) {
-        // Fallback – let yt-dlp pick the best
-        return [
-            {
-                format_id: "bestvideo+bestaudio/best",
-                label: "Best Quality",
-                resolution: "Auto",
-                size: "Unknown",
-                ext: "mp4",
-                recommended: true,
-            },
-        ];
+        return [{
+            format_id: "best",
+            label: "Best Quality",
+            resolution: "Auto",
+            size: "Unknown",
+            ext: "mp4",
+            recommended: true,
+        }];
     }
 
-    // ── 1. "Best Quality" option (yt-dlp will pick highest) ──────────
-    result.push({
-        format_id: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
-        label: "Best Quality",
-        resolution: "Highest Available",
-        size: "Unknown",
-        ext: "mp4",
-        recommended: true,
-    });
+    const result = [];
+    const seenHeights = new Set();
 
-    // ── 2. Concrete pre-merged video+audio MP4 formats by height ─────
-    const targetHeights = [2160, 1440, 1080, 720, 480, 360];
-    const seen = new Set();
-
-    // Get all formats that have both video and audio (pre-muxed)
-    const muxed = formats
-        .filter(
-            (f) =>
-                f.vcodec !== "none" &&
-                f.vcodec !== null &&
-                f.acodec !== "none" &&
-                f.acodec !== null &&
-                f.height
-        )
+    // 1. Get all formats with video
+    const videoFormats = formats
+        .filter(f => f.vcodec !== "none" && f.vcodec !== null && f.height)
         .sort((a, b) => (b.height || 0) - (a.height || 0));
 
-    // Get video-only formats to pair with audio (for sites like YouTube)
-    const videoOnly = formats
-        .filter(
-            (f) =>
-                (f.vcodec !== "none" && f.vcodec !== null) &&
-                (f.acodec === "none" || f.acodec === null) &&
-                f.height
-        )
-        .sort((a, b) => (b.height || 0) - (a.height || 0));
+    // 2. Best Audio option for merging
+    const bestAudio = formats
+        .filter(f => f.acodec !== "none" && f.acodec !== null && (f.vcodec === "none" || f.vcodec === null))
+        .sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
 
-    for (const height of targetHeights) {
-        const key = String(height);
-        if (seen.has(key)) continue;
+    for (const f of videoFormats) {
+        const h = f.height;
+        if (seenHeights.has(h)) continue;
 
-        // Find a pre-muxed format at this height
-        const muxedMatch = muxed.find(
-            (f) => f.height && f.height <= height && f.height >= height * 0.85
-        );
+        // Only show common standard resolutions or the absolute best
+        // (This prevents showing dozens of slight variations)
+        const isStandard = [2160, 1440, 1080, 720, 480, 360, 240].includes(h);
+        const isHighest = h === videoFormats[0].height;
 
-        // Find video-only format at this height (for sites like YouTube that split streams)
-        const videoMatch = videoOnly.find(
-            (f) => f.height && f.height <= height && f.height >= height * 0.85
-        );
-
-        if (!muxedMatch && !videoMatch) continue;
-
-        seen.add(key);
+        if (!isStandard && !isHighest) continue;
+        seenHeights.add(h);
 
         let label;
-        if (height >= 2160) label = "4K Ultra HD";
-        else if (height >= 1440) label = "2K QHD";
-        else if (height >= 1080) label = "Full HD";
-        else if (height >= 720) label = "HD";
-        else if (height >= 480) label = "SD";
+        if (h >= 2160) label = "4K Ultra HD";
+        else if (h >= 1440) label = "2K QHD";
+        else if (h >= 1080) label = "Full HD";
+        else if (h >= 720) label = "HD";
+        else if (h >= 480) label = "SD";
         else label = "Low Quality";
 
-        if (muxedMatch) {
-            // Pre-muxed – can stream directly without ffmpeg
-            result.push({
-                format_id: muxedMatch.format_id,
-                label,
-                resolution: `${muxedMatch.height}p`,
-                size: formatBytes(muxedMatch.filesize || muxedMatch.filesize_approx),
-                ext: muxedMatch.ext || "mp4",
-            });
-        } else if (videoMatch) {
-            // Needs merging – pick best audio to go with it
-            const bestAudio = formats
-                .filter(
-                    (f) =>
-                        (f.acodec !== "none" && f.acodec !== null) &&
-                        (f.vcodec === "none" || f.vcodec === null)
-                )
-                .sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
+        // If it's the highest, we can call it "Best Quality"
+        if (isHighest) label = `Best (${label})`;
 
-            const formatId = bestAudio
-                ? `${videoMatch.format_id}+${bestAudio.format_id}`
-                : videoMatch.format_id;
+        const hasAudio = f.acodec !== "none" && f.acodec !== null;
+        const format_id = hasAudio ? f.format_id : (bestAudio ? `${f.format_id}+${bestAudio.format_id}` : f.format_id);
 
-            result.push({
-                format_id: formatId,
-                label,
-                resolution: `${videoMatch.height}p`,
-                size: "Unknown", // can't know merged size easily
-                ext: "mp4",
-                needsMerge: true,
-            });
-        }
+        result.push({
+            format_id,
+            label,
+            resolution: `${h}p`,
+            size: formatBytes(f.filesize || f.filesize_approx),
+            ext: "mp4", // always target mp4 for mobile compatibility
+            recommended: isHighest
+        });
     }
 
-    // ── 3. Audio Only ─────────────────────────────────────────────────
-    const audioFormats = formats
-        .filter(
-            (f) =>
-                (f.acodec !== "none" && f.acodec !== null) &&
-                (f.vcodec === "none" || f.vcodec === null)
-        )
-        .sort((a, b) => (b.abr || 0) - (a.abr || 0));
+    // 3. Audio Only
+    const audioOnly = formats
+        .filter(f => f.acodec !== "none" && f.acodec !== null && (f.vcodec === "none" || f.vcodec === null))
+        .sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
 
-    if (audioFormats.length > 0) {
-        const best = audioFormats[0];
+    if (audioOnly) {
         result.push({
-            format_id: best.format_id,
+            format_id: audioOnly.format_id,
             label: "Audio Only",
-            resolution: `${best.abr ? Math.round(best.abr) : "128"}kbps`,
-            size: formatBytes(best.filesize || best.filesize_approx),
+            resolution: `${audioOnly.abr ? Math.round(audioOnly.abr) : "128"}kbps`,
+            size: formatBytes(audioOnly.filesize || audioOnly.filesize_approx),
             ext: "mp3",
         });
     }
 
-    // Remove duplicates / keep only unique resolutions
-    const unique = [];
-    const resolutionsSeen = new Set();
-    for (const f of result) {
-        const key = f.resolution + f.ext;
-        if (!resolutionsSeen.has(key)) {
-            resolutionsSeen.add(key);
-            unique.push(f);
-        }
-    }
-
-    return unique;
+    return result;
 }
 
 // ─── Express App ───────────────────────────────────────────────────
