@@ -25,6 +25,9 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    allowedHosts: [
+      'e66b-165-101-118-102.ngrok-free.app'
+    ]
   },
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.

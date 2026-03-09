@@ -122,3 +122,23 @@ Social Media Downloaders are "High Risk" for App Stores. Follow these rules to a
 ## 🛠️ Next Steps?
 1.  **Host your API first.** Do you have a hosting provider in mind?
 2.  **Native Save Logic.** Should I update your code to support the `@capacitor/filesystem` for real mobile saving?
+
+---
+
+## 🍪 Fix: "Login Required" or "Rate Limit" (Instagram/YouTube)
+
+If your server gets blocked by Instagram or YouTube, follow these steps:
+
+### 1. Export Cookies
+1.  Install the **"EditThisCookie"** or **"Get cookies.txt LOCALLY"** extension in Chrome.
+2.  Go to [Instagram.com](https://www.instagram.com) and log in.
+3.  Open the extension and click **Export** (choose **Netscape** format).
+4.  Save the text as `cookies.txt`.
+
+### 2. Upload to Server
+1.  Place `cookies.txt` inside the `server/` folder.
+2.  Push to GitHub. 
+3.  The backend will automatically use these cookies to bypass the block.
+
+> [!WARNING]
+> Keep `cookies.txt` private! Add it to your `.gitignore` if your repository is public.

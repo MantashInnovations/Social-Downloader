@@ -46,6 +46,29 @@ async function initYtDlp() {
 
 // ─── Helpers ───────────────────────────────────────────────────────
 
+/**
+ * Returns common arguments for all yt-dlp calls to ensure 
+ * reliability and avoid bot detection.
+ */
+function getCommonArgs() {
+    const args = [
+        "--no-playlist",
+        "--no-warnings",
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "--add-header", "Accept-Language:en-US,en;q=0.9",
+        "--add-header", "Sec-Fetch-Mode:navigate",
+    ];
+
+    // Check if cookies.txt exists in the server folder
+    const cookiesPath = path.join(__dirname, "cookies.txt");
+    if (fs.existsSync(cookiesPath)) {
+        console.log("🍪 Using cookies.txt for authentication");
+        args.push("--cookies", cookiesPath);
+    }
+
+    return args;
+}
+
 function formatDuration(seconds) {
     if (!seconds) return "0:00";
     const h = Math.floor(seconds / 3600);
@@ -241,11 +264,13 @@ app.get("/api/meta", async (req, res) => {
     console.log(`[meta] ${url}`);
 
     try {
-        const info = await ytDlp.getVideoInfo([
+        const args = [
             url,
-            "--no-playlist",
-            "--no-warnings",
-        ]);
+            "--dump-json",
+            ...getCommonArgs()
+        ];
+
+        const info = await ytDlp.getVideoInfo(args);
 
         const formats = processFormats(info.formats, info);
 
@@ -292,25 +317,44 @@ app.get("/api/download", async (req, res) => {
         format_id || "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "--merge-output-format",
         isAudio ? "mp3" : "mp4",
-        "--no-playlist",
-        "--no-warnings",
         // TikTok watermark-free
         "--extractor-args",
         "tiktok:api_hostname=api22-normal-c-alisg.tiktokv.com",
         "-o",
         tmpFile,
+        ...getCommonArgs()
     ];
 
     try {
-        // Download to temp file
+        console.log(`[download] starting: ${args.join(" ")}`);
+
+        // Download to temp file with detailed logging
+        const ytDlpProcess = ytDlp.exec(args);
+
+        ytDlpProcess.on("progress", (progress) => {
+            // Optional: log progress to server console
+        });
+
+        ytDlpProcess.on("error", (err) => {
+            console.error("[download] yt-dlp error:", err.message);
+        });
+
+        ytDlpProcess.on("close", (code) => {
+            console.log(`[download] yt-dlp process closed with code ${code}`);
+        });
+
+        // Wait for download to complete
         await ytDlp.execPromise(args);
 
         if (!fs.existsSync(tmpFile)) {
-            return res.status(500).json({ error: "Download failed: file not created" });
+            console.error(`[download] failed: file not found at ${tmpFile}`);
+            return res.status(500).json({ error: "Download failed: file not created. This can happen if ffmpeg is missing for merging, or the site blocked the request." });
         }
 
         const stat = fs.statSync(tmpFile);
         const contentType = isAudio ? "audio/mpeg" : "video/mp4";
+
+        console.log(`[download] streaming ${stat.size} bytes: ${tmpFile}`);
 
         res.setHeader("Content-Type", contentType);
         res.setHeader(
@@ -323,28 +367,32 @@ app.get("/api/download", async (req, res) => {
         const fileStream = fs.createReadStream(tmpFile);
 
         fileStream.on("end", () => {
-            // Clean up temp file after streaming
-            fs.unlink(tmpFile, () => { });
+            console.log(`[download] finished streaming: ${tmpFile}`);
+            fs.unlink(tmpFile, (err) => {
+                if (err) console.error(`[download] clean-up error:`, err.message);
+            });
         });
 
         fileStream.on("error", (err) => {
             console.error("[download] stream error:", err.message);
             fs.unlink(tmpFile, () => { });
-            if (!res.headersSent) res.status(500).json({ error: err.message });
+            if (!res.headersSent) res.status(500).json({ error: "Failed to stream file to client." });
         });
 
         req.on("close", () => {
-            // Client disconnected – clean up
             fileStream.destroy();
             fs.unlink(tmpFile, () => { });
         });
 
         fileStream.pipe(res);
     } catch (err) {
-        console.error("[download] error:", err.message);
-        fs.unlink(tmpFile, () => { });
-        if (!res.headersSent)
-            res.status(500).json({ error: err.message || "Download failed" });
+        console.error("[download] fatal error:", err.message);
+        if (fs.existsSync(tmpFile)) fs.unlink(tmpFile, () => { });
+        if (!res.headersSent) {
+            let msg = err.message;
+            if (msg.includes("ffmpeg")) msg = "FFmpeg is required to merge video and audio high-quality streams. Please ensure it is installed.";
+            res.status(500).json({ error: msg || "Download failed" });
+        }
     }
 });
 

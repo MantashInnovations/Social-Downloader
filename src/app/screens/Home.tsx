@@ -132,41 +132,51 @@ function QualitySheet({
       </div>
 
       {/* Quality options */}
-      <div className="px-6 space-y-2">
-        {meta.qualities.map((q) => (
-          <button
-            key={q.label}
-            onClick={() => onSelect(q)}
-            className="w-full flex items-center justify-between p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 hover:border-violet-400 dark:hover:border-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-all group"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-zinc-100 dark:bg-zinc-800 group-hover:bg-violet-100 dark:group-hover:bg-violet-900/40 flex items-center justify-center transition-colors">
-                <Download size={15} className="text-zinc-600 dark:text-zinc-400 group-hover:text-violet-600 dark:group-hover:text-violet-400" />
-              </div>
-              <div className="text-left">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-zinc-900 dark:text-white">
-                    {q.label}
-                  </span>
-                  {q.recommended && (
-                    <span className="px-1.5 py-0.5 text-[10px] font-bold bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300 rounded-md">
-                      BEST
-                    </span>
-                  )}
+      <div className="px-6 space-y-2 max-h-[40vh] overflow-y-auto no-scrollbar pb-2">
+        {meta.qualities
+          .filter(q => q.label && q.label !== "Unknown")
+          .map((q) => (
+            <button
+              key={q.format_id}
+              onClick={() => onSelect(q)}
+              className="w-full flex items-center justify-between p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 hover:border-violet-400 dark:hover:border-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-all group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-zinc-100 dark:bg-zinc-800 group-hover:bg-violet-100 dark:group-hover:bg-violet-900/40 flex items-center justify-center transition-colors">
+                  <Download size={15} className="text-zinc-600 dark:text-zinc-400 group-hover:text-violet-600 dark:group-hover:text-violet-400" />
                 </div>
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {q.resolution}
-                </span>
+                <div className="text-left">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-zinc-900 dark:text-white">
+                      {q.label}
+                    </span>
+                    {q.recommended && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-bold bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300 rounded-md">
+                        BEST
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    <span>{q.resolution}</span>
+                    {q.ext && (
+                      <>
+                        <span>•</span>
+                        <span className="uppercase text-[10px] font-bold opacity-60 bg-zinc-200 dark:bg-zinc-800 px-1 rounded">{q.ext}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500">
-                {q.size}
-              </span>
-              <ChevronRight size={14} className="text-zinc-300 dark:text-zinc-600 group-hover:text-violet-500 transition-colors" />
-            </div>
-          </button>
-        ))}
+              <div className="flex items-center gap-2">
+                {q.size && q.size !== "Unknown" && (
+                  <span className="text-xs font-bold text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/30 px-2 py-1 rounded-lg">
+                    {q.size}
+                  </span>
+                )}
+                <ChevronRight size={14} className="text-zinc-300 dark:text-zinc-600 group-hover:text-violet-500 transition-colors" />
+              </div>
+            </button>
+          ))}
       </div>
     </motion.div>
   );
@@ -267,17 +277,9 @@ export function Home() {
             animate={{ scale: 1 }}
             transition={{ type: "spring" }}
           >
-            <AlertCircle size={36} className="text-red-500" />
+            <AlertCircle size={48} className="text-red-500/20" />
           </motion.div>
-          <p className="text-xs font-semibold text-red-500 dark:text-red-400 leading-tight mt-1">
-            {error ?? "Something went wrong"}
-          </p>
-          <button
-            onClick={reset}
-            className="mt-1 flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
-          >
-            <RotateCcw size={11} /> Tap to retry
-          </button>
+          <p className="text-sm font-bold text-zinc-400">Oops!</p>
         </div>
       );
     }
@@ -361,6 +363,36 @@ export function Home() {
           className="absolute w-64 h-64 rounded-full pointer-events-none opacity-60 blur-2xl transition-all duration-700"
           style={glowStyle}
         />
+
+        {/* Floating Error Message Above Circle */}
+        <AnimatePresence>
+          {state === "error" && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="absolute -top-16 left-0 right-0 mx-auto w-fit z-30"
+            >
+              <div className="bg-red-500 text-white rounded-2xl px-5 py-3 shadow-xl flex items-center gap-3 border border-red-400">
+                <div className="bg-white/20 p-1.5 rounded-lg shrink-0">
+                  <AlertCircle size={16} />
+                </div>
+                <div>
+                  <p className="text-xs font-bold leading-none mb-0.5 whitespace-nowrap">Error</p>
+                  <p className="text-[10px] opacity-90 leading-tight">
+                    {error ?? "Something went wrong"}
+                  </p>
+                </div>
+                <button
+                  onClick={reset}
+                  className="ml-2 pl-3 border-l border-white/20 text-[10px] font-bold tracking-tight hover:opacity-75 transition-opacity py-1 shrink-0"
+                >
+                  RETRY
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Big circle */}
         <div className="relative w-56 h-56 sm:w-[232px] sm:h-[232px]">
