@@ -205,6 +205,16 @@ function saveDownloads(items: DownloadedItem[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
 }
 
+// ─── API Configuration ─────────────────────────────────────────────
+
+/**
+ * Replace this with your public Railway URL!
+ * Example: "https://social-downloader.up.railway.app"
+ */
+const PRODUCTION_API_URL = "https://social-downloader-production.up.railway.app";
+
+const API_BASE = PRODUCTION_API_URL;
+
 // ─── Hook ──────────────────────────────────────────────────────────
 
 export function useDownloader() {
@@ -235,7 +245,8 @@ export function useDownloader() {
     setState("fetching-meta");
 
     try {
-      const res = await fetch(`/api/meta?url=${encodeURIComponent(url)}`);
+      const apiUrl = `${API_BASE}/api/meta?url=${encodeURIComponent(url)}`;
+      const res = await fetch(apiUrl);
 
       if (!res.ok) {
         let errMsg = "Failed to fetch video info";
@@ -309,7 +320,8 @@ export function useDownloader() {
       });
 
       try {
-        const response = await fetch(`/api/download?${params.toString()}`);
+        const apiUrl = `${API_BASE}/api/download?${params.toString()}`;
+        const response = await fetch(apiUrl);
 
         if (!response.ok) {
           let errMsg = "Download failed";
