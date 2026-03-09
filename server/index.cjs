@@ -114,7 +114,7 @@ function processFormats(formats, info) {
     const result = [];
     const seenHeights = new Set();
 
-    // 1. Get all formats with video
+    // 1. Get all formats with video, sorted by height
     const videoFormats = formats
         .filter(f => f.vcodec !== "none" && f.vcodec !== null && f.height)
         .sort((a, b) => (b.height || 0) - (a.height || 0));
@@ -127,13 +127,6 @@ function processFormats(formats, info) {
     for (const f of videoFormats) {
         const h = f.height;
         if (seenHeights.has(h)) continue;
-
-        // Only show common standard resolutions or the absolute best
-        // (This prevents showing dozens of slight variations)
-        const isStandard = [2160, 1440, 1080, 720, 480, 360, 240].includes(h);
-        const isHighest = h === videoFormats[0].height;
-
-        if (!isStandard && !isHighest) continue;
         seenHeights.add(h);
 
         let label;
@@ -142,9 +135,9 @@ function processFormats(formats, info) {
         else if (h >= 1080) label = "Full HD";
         else if (h >= 720) label = "HD";
         else if (h >= 480) label = "SD";
-        else label = "Low Quality";
+        else label = "Mobile Quality";
 
-        // If it's the highest, we can call it "Best Quality"
+        const isHighest = h === videoFormats[0].height;
         if (isHighest) label = `Best (${label})`;
 
         const hasAudio = f.acodec !== "none" && f.acodec !== null;
@@ -155,7 +148,7 @@ function processFormats(formats, info) {
             label,
             resolution: `${h}p`,
             size: formatBytes(f.filesize || f.filesize_approx),
-            ext: "mp4", // always target mp4 for mobile compatibility
+            ext: f.ext || "mp4",
             recommended: isHighest
         });
     }
@@ -171,7 +164,7 @@ function processFormats(formats, info) {
             label: "Audio Only",
             resolution: `${audioOnly.abr ? Math.round(audioOnly.abr) : "128"}kbps`,
             size: formatBytes(audioOnly.filesize || audioOnly.filesize_approx),
-            ext: "mp3",
+            ext: audioOnly.ext || "mp3",
         });
     }
 
@@ -204,7 +197,6 @@ app.get("/api/meta", async (req, res) => {
         ];
 
         const info = await ytDlp.getVideoInfo(args);
-
         const formats = processFormats(info.formats, info);
 
         return res.json({
@@ -237,94 +229,83 @@ app.get("/api/download", async (req, res) => {
     const { url, format_id, ext, title } = req.query;
     if (!url) return res.status(400).json({ error: "url is required" });
 
-    const safeTitle = sanitizeFilename(title);
-    const outputExt = ext || "mp4";
-    const isAudio = ["mp3", "m4a", "opus", "wav", "flac"].includes(outputExt);
-    const tmpFile = path.join(os.tmpdir(), `snag_${Date.now()}.${outputExt}`);
+    const isAudio = ["mp3", "m4a", "opus", "wav", "flac"].includes(ext || "");
+    const downloadId = `snag_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const workDir = path.join(os.tmpdir(), downloadId);
 
-    console.log(`[download] format=${format_id} ext=${outputExt} url=${url}`);
+    // Create dedicated subfolder to avoid rename hits
+    if (!fs.existsSync(workDir)) fs.mkdirSync(workDir, { recursive: true });
+
+    const outputTemplate = path.join(workDir, `download.%(ext)s`);
+
+    console.log(`[download] id=${downloadId} format=${format_id} url=${url}`);
 
     const args = [
         url,
         "-f",
-        format_id || "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        format_id || "bestvideo+bestaudio/best",
         "--merge-output-format",
         isAudio ? "mp3" : "mp4",
-        // TikTok watermark-free
-        "--extractor-args",
-        "tiktok:api_hostname=api22-normal-c-alisg.tiktokv.com",
+        "--no-mtime",
+        "--fixup", "warn",
         "-o",
-        tmpFile,
+        outputTemplate,
         ...getCommonArgs()
     ];
 
     try {
-        console.log(`[download] starting: ${args.join(" ")}`);
+        console.log(`[download] starting in ${workDir}`);
 
-        // Download to temp file with detailed logging
-        const ytDlpProcess = ytDlp.exec(args);
-
-        ytDlpProcess.on("progress", (progress) => {
-            // Optional: log progress to server console
-        });
-
-        ytDlpProcess.on("error", (err) => {
-            console.error("[download] yt-dlp error:", err.message);
-        });
-
-        ytDlpProcess.on("close", (code) => {
-            console.log(`[download] yt-dlp process closed with code ${code}`);
-        });
-
-        // Wait for download to complete
+        // Download with custom CWD
         await ytDlp.execPromise(args);
 
-        if (!fs.existsSync(tmpFile)) {
-            console.error(`[download] failed: file not found at ${tmpFile}`);
-            return res.status(500).json({ error: "Download failed: file not created. This can happen if ffmpeg is missing for merging, or the site blocked the request." });
+        // Find the resulting file in the subfolder
+        const files = fs.readdirSync(workDir);
+        const createdFile = files.find(f => f.startsWith("download") && !f.endsWith(".part") && !f.endsWith(".ytdl"));
+
+        if (!createdFile) {
+            throw new Error("Download finished but no output file was found.");
         }
 
-        const stat = fs.statSync(tmpFile);
-        const contentType = isAudio ? "audio/mpeg" : "video/mp4";
+        const fullPath = path.join(workDir, createdFile);
+        const actualExt = path.extname(fullPath).slice(1);
+        const stat = fs.statSync(fullPath);
+        const contentType = (actualExt === "mp3" || isAudio) ? "audio/mpeg" : "video/mp4";
 
-        console.log(`[download] streaming ${stat.size} bytes: ${tmpFile}`);
+        console.log(`[download] streaming: ${createdFile} (${stat.size} bytes)`);
 
         res.setHeader("Content-Type", contentType);
         res.setHeader(
             "Content-Disposition",
-            `attachment; filename="${safeTitle}.${outputExt}"`
+            `attachment; filename="${sanitizeFilename(title)}.${actualExt}"`
         );
         res.setHeader("Content-Length", String(stat.size));
         res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Disposition");
 
-        const fileStream = fs.createReadStream(tmpFile);
+        const fileStream = fs.createReadStream(fullPath);
 
         fileStream.on("end", () => {
-            console.log(`[download] finished streaming: ${tmpFile}`);
-            fs.unlink(tmpFile, (err) => {
-                if (err) console.error(`[download] clean-up error:`, err.message);
-            });
+            console.log(`[download] cleanup: deleting ${workDir}`);
+            fs.rm(workDir, { recursive: true, force: true }, () => { });
         });
 
         fileStream.on("error", (err) => {
             console.error("[download] stream error:", err.message);
-            fs.unlink(tmpFile, () => { });
-            if (!res.headersSent) res.status(500).json({ error: "Failed to stream file to client." });
+            fs.rm(workDir, { recursive: true, force: true }, () => { });
+            if (!res.headersSent) res.status(500).json({ error: "Failed to stream file." });
         });
 
         req.on("close", () => {
             fileStream.destroy();
-            fs.unlink(tmpFile, () => { });
+            fs.rm(workDir, { recursive: true, force: true }, () => { });
         });
 
         fileStream.pipe(res);
     } catch (err) {
         console.error("[download] fatal error:", err.message);
-        if (fs.existsSync(tmpFile)) fs.unlink(tmpFile, () => { });
+        fs.rm(workDir, { recursive: true, force: true }, () => { });
         if (!res.headersSent) {
-            let msg = err.message;
-            if (msg.includes("ffmpeg")) msg = "FFmpeg is required to merge video and audio high-quality streams. Please ensure it is installed.";
-            res.status(500).json({ error: msg || "Download failed" });
+            res.status(500).json({ error: err.message || "Download failed" });
         }
     }
 });
