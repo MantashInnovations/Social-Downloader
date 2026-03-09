@@ -244,14 +244,18 @@ app.get("/api/download", async (req, res) => {
         url,
         "-f",
         format_id || "bestvideo+bestaudio/best",
-        "--merge-output-format",
-        isAudio ? "mp3" : "mp4",
         "--no-mtime",
         "--fixup", "warn",
         "-o",
         outputTemplate,
         ...getCommonArgs()
     ];
+
+    if (isAudio) {
+        args.push("--extract-audio", "--audio-format", "mp3");
+    } else {
+        args.push("--merge-output-format", "mp4");
+    }
 
     try {
         console.log(`[download] starting in ${workDir}`);
